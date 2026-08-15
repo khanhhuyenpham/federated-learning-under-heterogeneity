@@ -1,0 +1,18 @@
+{
+    "seed": 42,
+    "num_clients": 5,
+    "num_rounds": 20,
+    "batch_size": 64,
+    "learning_rate": 0.01,
+    "E_values": [
+        1,
+        5,
+        10
+    ],
+    "dataset": "MNIST",
+    "partition": "IID",
+    "model": "SimpleMLP",
+    "hidden_size": 128,
+    "optimizer": "SGD",
+    "loss": "CrossEntropyLoss"
+}

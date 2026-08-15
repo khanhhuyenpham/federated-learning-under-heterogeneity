@@ -1,0 +1,4 @@
+E,final_test_loss,final_test_accuracy,rounds_to_90,rounds_to_95,local_epochs_to_90,local_epochs_to_95
+1,0.2722987774729729,0.9233,7,,7,
+5,0.12640280392616987,0.9629,2,12.0,10,60.0
+10,0.08978192781955004,0.9725,1,6.0,10,60.0

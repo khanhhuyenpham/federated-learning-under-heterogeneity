@@ -1,0 +1,17 @@
+# Colab / Jupyter
+sample_data/
+.ipynb_checkpoints/
+
+# Downloaded datasets
+datasets/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# OS/editor noise
+.DS_Store
+.vscode/
+
+# Temporary checkpoints generated during scratch runs
+checkpoints/
