@@ -1,0 +1,4 @@
+local_epochs,final_loss,final_accuracy,round_to_70,round_to_75,round_to_80,cumulative_local_epochs_to_70,cumulative_local_epochs_to_75,cumulative_local_epochs_to_80
+1,0.6300601646423339,0.7884,10,14,,10,14,
+5,0.5471263513565063,0.7998,7,10,,35,50,
+10,0.4829,0.8243,7,9,15.0,70,90,150.0

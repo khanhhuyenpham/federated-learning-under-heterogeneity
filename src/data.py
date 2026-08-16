@@ -1,6 +1,7 @@
 
 import torch
 import pandas as pd
+import numpy as np
 
 def partition_shard(train_ds, num_clients : int, seed : int, shard_per_client : int):
     generator = torch.Generator().manual_seed(seed)
@@ -21,6 +22,63 @@ def partition_shard(train_ds, num_clients : int, seed : int, shard_per_client : 
     
     return client_indices
 
+import numpy as np
+
+def partition_dirichlet(
+    train_ds,
+    num_clients: int,
+    alpha: float,
+    seed: int,
+):
+    assert num_clients > 0
+    assert alpha > 0
+
+    rng = np.random.default_rng(seed)
+
+    targets = train_ds.targets.cpu().numpy()
+    
+    client_indices = {
+        client_id: []
+        for client_id in range(num_clients)
+    }
+
+    classes = np.unique(targets)
+
+    for label in classes:
+
+        class_indices = np.flatnonzero(targets == label)
+
+        rng.shuffle(class_indices)
+
+        proportions = rng.dirichlet(
+            np.full(num_clients, alpha)
+        )
+
+        split_points = (
+            np.cumsum(proportions)[:-1]
+            * len(class_indices)
+        ).astype(int)
+
+        chunks = np.split(
+            class_indices,
+            split_points
+        )
+
+        for client_id, chunk in enumerate(chunks):
+            client_indices[client_id].extend(
+                chunk.tolist()
+            )
+
+    for client_id in client_indices:
+        indices = np.array(
+            client_indices[client_id],
+            dtype=np.int64
+        )
+        rng.shuffle(indices)
+        client_indices[client_id] = indices.tolist()
+
+    return client_indices
+   
 def partition_iid(train_ds, num_clients: int, seed: int):
     generator = torch.Generator().manual_seed(seed)
     shuffled = torch.randperm(len(train_ds), generator=generator)
