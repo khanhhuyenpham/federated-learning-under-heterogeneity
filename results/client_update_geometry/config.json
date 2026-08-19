@@ -1,0 +1,18 @@
+{
+  "seed": 42,
+  "num_clients": 5,
+  "alpha": 0.1,
+  "mu_values": [
+    0.0,
+    0.1,
+    1.0
+  ],
+  "local_epochs": 5,
+  "num_rounds": 20,
+  "batch_size": 64,
+  "learning_rate": 0.01,
+  "datasets_dir": "datasets",
+  "iid_results_dir": "results/iid_baseline",
+  "dirichlet_results_dir": "results/dirichlet_noniid",
+  "results_dir": "results/client_update_geometry"
+}
