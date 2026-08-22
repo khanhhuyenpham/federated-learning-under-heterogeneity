@@ -290,11 +290,11 @@ def run_experiment(
                 }
                 for client_row in client_rows
             ]
-            
+
             if verbose:
                 print(
                     f"mu={mu_value:g} | "
-                    f"round=00/{config.num_rounds:02d} | "
+                    f"round={round_idx:02d}/{config.num_rounds:02d} | "
                     f"validation_loss={summary['weighted_loss']:.4f} | "
                     f"validation_accuracy={summary['weighted_accuracy']:.2%} | "
                     f"worst_client_accuracy={summary['worst_client_accuracy']:.2%}"
