@@ -3,6 +3,7 @@ from itertools import combinations
 
 import numpy as np
 import torch
+from typing import Dict
 
 from .diagnostics import (
     cosine_similarity_updates,
@@ -207,6 +208,11 @@ class RunResult:
     pairwise_update_diagnostics: pd.DataFrame
     round_diagnostics: pd.DataFrame
 
+    final_model_states: Dict[
+        float,
+        Dict[str, torch.Tensor],
+    ]
+
 
 import copy
 from .data import create_client_loaders
@@ -226,7 +232,10 @@ def run_experiment(
     client_update_rows = []
     pairwise_update_rows = []
     all_round_rows = []
-
+    final_model_states: Dict[
+        float,
+        Dict[str, torch.Tensor],
+    ] = {}
     for mu_value in mu_values:
         set_seed(config.seed)
         global_model = copy.deepcopy(initial_model).to(device)
@@ -306,12 +315,18 @@ def run_experiment(
             pairwise_update_rows.extend(pairwise_rows)
             all_round_rows.extend(current_round_rows)
 
+        final_model_states[float(mu_value)] = {
+            name: tensor.detach().cpu().clone()
+            for name, tensor in global_model.state_dict().items()
+        }
+
     result = RunResult(
         performance_history=pd.DataFrame(performance_rows),
         client_performance_history=pd.DataFrame(client_performance_rows),
         client_update_diagnostics=pd.DataFrame(client_update_rows),
         pairwise_update_diagnostics=pd.DataFrame(pairwise_update_rows),
         round_diagnostics=pd.DataFrame(all_round_rows),
+        final_model_states=final_model_states
     )
 
     M = len(mu_values)
@@ -324,5 +339,7 @@ def run_experiment(
     assert len(result.client_update_diagnostics) == M * R * K
     assert len(result.pairwise_update_diagnostics) == M * R * P
     assert len(result.round_diagnostics) == M * R
-
+    assert set(result.final_model_states.keys()) == {
+        float(mu) for mu in mu_values
+    }
     return result

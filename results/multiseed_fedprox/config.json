@@ -1,0 +1,22 @@
+{
+  "seeds": [
+    42,
+    43,
+    44
+  ],
+  "mu_values": [
+    0.0,
+    0.1,
+    1.0
+  ],
+  "num_clients": 5,
+  "alpha": 0.1,
+  "local_epochs": 5,
+  "num_rounds": 20,
+  "batch_size": 64,
+  "learning_rate": 0.01,
+  "validation_fraction": 0.1,
+  "test_fraction": 0.1,
+  "num_workers": 0,
+  "results_dir": "D:\\HKU\\New folder\\federated-learning-under-heterogeneity-final\\federated-learning-under-heterogeneity\\results\\multiseed_fedprox"
+}
