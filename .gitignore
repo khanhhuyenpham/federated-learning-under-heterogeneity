@@ -15,3 +15,7 @@ __pycache__/
 
 # Temporary checkpoints generated during scratch runs
 checkpoints/
+
+results/**/final_model_mu_*.pt
+results/**/*.zip
+results/**/_invalid_client_history/
