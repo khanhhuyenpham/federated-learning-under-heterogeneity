@@ -1,0 +1,16 @@
+{
+  "seeds": [
+    42,
+    43,
+    44
+  ],
+  "num_clients": 5,
+  "alpha": 0.1,
+  "local_epochs": 5,
+  "num_rounds": 20,
+  "batch_size": 64,
+  "learning_rate": 0.01,
+  "num_workers": 0,
+  "baseline_results_dir": "/kaggle/working/federated-learning-under-heterogeneity/results/multiseed_fedprox",
+  "results_dir": "/kaggle/working/federated-learning-under-heterogeneity/results/scaffold_under_heterogeneity"
+}
