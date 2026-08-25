@@ -2,7 +2,14 @@
   "seed": 42,
   "num_clients": 5,
   "alpha": 0.1,
-  "mu_values": [
+  "performance_mu_values": [
+    0.0,
+    0.001,
+    0.01,
+    0.1,
+    1.0
+  ],
+  "diagnostic_mu_values": [
     0.0,
     0.1,
     1.0

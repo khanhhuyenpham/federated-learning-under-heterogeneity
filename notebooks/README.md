@@ -1,21 +1,19 @@
-# Experiment guide
+# Notebook Guide
 
-The notebooks are designed to be read in order. Together they move from implementation correctness to a mechanism-level question about heterogeneous federated optimization.
+Read the notebooks as a research progression. Notebooks 01-04 document educational and exploratory development; Notebooks 05-07 provide the canonical evidence used in the root README.
 
-| # | Notebook | Main purpose | Key output |
-|---:|---|---|---|
-| 01 | [`01_fedavg_from_scratch.ipynb`](01_fedavg_from_scratch.ipynb) | Implement weighted FedAvg without an FL framework | IID local-epoch baseline |
-| 02 | [`02_fedavg_shard_noniid.ipynb`](02_fedavg_shard_noniid.ipynb) | Introduce pathological shard non-IID data | IID versus severe label concentration |
-| 03 | [`03_fedavg_dirichlet_noniid.ipynb`](03_fedavg_dirichlet_noniid.ipynb) | Control heterogeneity using Dirichlet `alpha` | Reusable `alpha = 0.1` partition |
-| 04 | [`04_fedprox_under_heterogeneity.ipynb`](04_fedprox_under_heterogeneity.ipynb) | Implement and sweep FedProx | Communication-round convergence comparison |
-| 05 | [`05_client_update_geometry.ipynb`](05_client_update_geometry.ipynb) | Measure update magnitude and directional alignment | Main mechanism-level analysis |
+Notebooks 01–04 are intentionally stored without execution outputs. Their code and explanatory markdown remain intact, while expensive experiments are opt-in. Notebooks 05–07 contain the regenerated saved-result analyses supporting the final conclusions.
 
-## Recommended reading paths
+|   # | Notebook                                                                         | Role                                                  | Default execution                                               |
+| --: | -------------------------------------------------------------------------------- | ----------------------------------------------------- | --------------------------------------------------------------- |
+|  01 | [`01_fedavg_from_scratch.ipynb`](01_fedavg_from_scratch.ipynb)                   | Educational FedAvg implementation under IID data.     | Full sweep disabled by default.                                 |
+|  02 | [`02_fedavg_shard_noniid.ipynb`](02_fedavg_shard_noniid.ipynb)                   | Educational shard non-IID experiment.                 | Missing runs are opt-in.                                        |
+|  03 | [`03_fedavg_dirichlet_noniid.ipynb`](03_fedavg_dirichlet_noniid.ipynb)           | Exploratory Dirichlet heterogeneity sweep.            | Full sweep disabled by default.                                 |
+|  04 | [`04_fedprox_under_heterogeneity.ipynb`](04_fedprox_under_heterogeneity.ipynb)   | Exploratory FedProx `mu` sweep.                       | Full sweep disabled by default.                                 |
+|  05 | [`05_client_update_geometry.ipynb`](05_client_update_geometry.ipynb)             | Canonical single-seed client-update geometry study.   | Loads committed artifacts unless `RUN_FULL_EXPERIMENT=True`.    |
+|  06 | [`06_multiseed_fedprox_robustness.ipynb`](06_multiseed_fedprox_robustness.ipynb) | Canonical multi-seed FedAvg/FedProx robustness study. | Full nine-condition run guarded by `RUN_FULL_MULTI_SEED=False`. |
+|  07 | [`07_scaffold_under_heterogeneity.ipynb`](07_scaffold_under_heterogeneity.ipynb) | Canonical multi-seed comparison with SCAFFOLD.        | Full multi-seed run guarded by `RUN_MULTI_SEED=False`.          |
 
-- **Project reviewer:** read Notebook 05, then Notebook 04.
-- **Implementation learner:** start with Notebook 01 and proceed in order.
-- **Results-only reader:** use the plots and CSVs under [`../results/`](../results/).
+The final comparisons use client-local held-out subsets split from the MNIST training collection. The official MNIST test split is not used for Notebooks 05-07.
 
-## Reproducibility note
-
-The experiments reuse saved initial weights and client partitions where controlled comparison requires them. Expensive training cells are not intended to run automatically when a notebook is opened; saved results are included so the analysis remains inspectable.
+Notebook 06 excludes the invalid legacy per-client validation-history artifact produced by an earlier adapter mistake. Current claims use the final client-test table, aggregate validation history, and geometry diagnostics.

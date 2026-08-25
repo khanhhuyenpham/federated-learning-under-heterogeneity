@@ -21,5 +21,5 @@
   "datasets_dir": "datasets",
   "iid_results_dir": "results/iid_baseline",
   "dirichlet_results_dir": "results/dirichlet_noniid",
-  "results_dir": "results/client_update_geometry_v2"
+  "results_dir": "results/client_update_geometry"
 }
