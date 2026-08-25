@@ -8,10 +8,18 @@ datasets/
 # Python
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # OS/editor noise
 .DS_Store
 .vscode/
+
+# Virtual environments
+.venv/
+venv/
+env/
 
 # Temporary checkpoints generated during scratch runs
 checkpoints/

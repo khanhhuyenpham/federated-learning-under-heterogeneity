@@ -18,5 +18,5 @@
   "validation_fraction": 0.1,
   "test_fraction": 0.1,
   "num_workers": 0,
-  "results_dir": "D:\\HKU\\New folder\\federated-learning-under-heterogeneity-final\\federated-learning-under-heterogeneity\\results\\multiseed_fedprox"
+  "results_dir": "results/multiseed_fedprox"
 }

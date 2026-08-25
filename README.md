@@ -1,177 +1,307 @@
-# Federated Learning Under Client Heterogeneity
+# Federated Optimization Under Statistical Heterogeneity
 
-[![PyTorch](https://img.shields.io/badge/PyTorch-from%20scratch-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
-[![Dataset](https://img.shields.io/badge/dataset-MNIST-4C8BF5)](http://yann.lecun.com/exdb/mnist/)
-[![Experiments](https://img.shields.io/badge/experiments-reproducible-2EA44F)](#reproducing-the-results)
+From-scratch PyTorch implementations of FedAvg, FedProx, and a
+sample-size-weighted SCAFFOLD variant, studied under controlled heterogeneous
+MNIST partitions.
 
-A from-scratch PyTorch study of how **statistical heterogeneity changes federated optimization**—from FedAvg baselines to FedProx and client-update geometry.
+I started this project because I did not want to treat federated learning
+algorithms as black boxes or judge them only by final accuracy. My initial
+intuition was that client drift might be controlled by limiting how far each
+client moves from the global model. That led me from FedAvg to FedProx, and then
+to measuring the client updates themselves: their magnitude, their directional
+agreement, and how much they reinforce or cancel one another.
 
-The central question is:
+The multi-seed results changed my understanding. FedProx reliably made updates
+smaller, but that did not reliably improve the global model. I therefore
+implemented SCAFFOLD to test a different idea: correcting client-specific drift
+instead of only restricting local movement.
 
-> Does proximal regularization improve federated optimization by shrinking client updates, aligning their directions, or both?
+Here, “from scratch” means that the federated optimization logic is implemented
+directly in PyTorch without Flower, TensorFlow Federated, or another federated
+learning framework.
 
-This is an experimental research repository, not a production FL framework. Every comparison reuses the same model initialization and, where applicable, the same saved client partition.
+## Research question
 
-## Key findings
+> Under strong statistical heterogeneity, is constraining local deviation
+> enough to improve federated optimization, or is explicitly correcting client
+> drift more effective?
 
-Under a strongly heterogeneous Dirichlet partition (`alpha = 0.1`) with 5 clients, 5 local epochs, and 20 communication rounds:
+I compare three approaches:
 
-- Moderate FedProx (`mu = 0.1`) reached 85% test accuracy in **10 rounds**, compared with **12 rounds** for FedAvg (`mu = 0`).
-- Mean client-update magnitude fell by **18.7%** at `mu = 0.1` and **49.6%** at `mu = 1.0`, relative to FedAvg.
-- Directional behavior was not explained by magnitude alone. Mean pairwise alignment increased overall with `mu`, but the effect varied across rounds and client pairs.
-- Leave-one-out alignment was negative for **72%**, **67%**, and **56%** of client-round observations at `mu = 0`, `0.1`, and `1.0`, respectively.
-- An exploratory intervention that reduced the influence of one post-hoc identified client reached **88.0% best accuracy**, versus **87.1%** with its original FedAvg weight.
+- **FedAvg:** average the clients' locally trained models.
+- **FedProx:** add a proximal penalty that keeps local models close to the
+  current global model.
+- **SCAFFOLD:** maintain server and client control variates that correct
+  systematic drift in local gradients.
 
-These are **single-seed observations**, not statistically significant or causal conclusions. The client-scaling result is an oracle-style diagnostic, not a deployable aggregation algorithm.
+## Main results
 
-![FedAvg and FedProx performance trajectories](results/client_update_geometry/alpha_0p1/figures/performance_trajectories.png)
+The final comparison uses three matched seeded federated environments. Each
+seed determines one client partition, train/validation/test split, initial
+model, and minibatch schedule. The seed—not a client or communication round—is
+the experimental unit.
 
-## What is client-update geometry?
+| Method | Weighted test accuracy | Macro client accuracy | Worst-client accuracy | Within-seed client SD |
+|---|---:|---:|---:|---:|
+| FedAvg | 91.74 ± 1.22% | 89.34 ± 3.38% | 82.91 ± 6.93% | 4.45 ± 2.03% |
+| FedProx (`mu = 0.1`) | 91.47 ± 1.39% | 89.68 ± 2.96% | 84.87 ± 3.93% | 3.57 ± 0.99% |
+| FedProx (`mu = 1.0`) | 87.89 ± 2.02% | 84.34 ± 6.05% | 73.38 ± 14.10% | 6.48 ± 4.31% |
+| Weighted SCAFFOLD | **94.87 ± 0.39%** | **94.12 ± 0.76%** | **90.92 ± 1.07%** | **2.24 ± 0.55%** |
 
-At round `t`, client `k` starts from the global model `w_t` and returns a locally trained model `w_k`. Its update is
+Values are mean ± sample standard deviation across `n = 3` seeds. “Macro”
+gives each client equal weight; weighted accuracy gives each held-out example
+equal weight. The within-seed client SD measures dispersion across the five
+client accuracies and is then summarized across seeds.
 
-```text
-Delta_k = w_k - w_t
-```
+![Matched validation trajectories for FedAvg, FedProx, and SCAFFOLD](results/scaffold_under_heterogeneity/figures/validation_trajectories.png)
 
-This project measures three complementary properties:
+### What I conclude from these results
 
-| Diagnostic | Definition | Question |
-|---|---|---|
-| Update magnitude | `||Delta_k||_2` | How far did the client move? |
-| Pairwise alignment | `cos(Delta_i, Delta_j)` | Do two clients move in similar directions? |
-| Aggregate alignment | `cos(Delta_k, sum_j p_j Delta_j)` | Does a client agree with the server update? |
+1. **FedProx changed the optimization geometry more consistently than it
+   changed performance.** With `mu = 0.1`, median relative update magnitude
+   decreased in all three seeds, by 13.6% on average. Leave-one-out alignment
+   also became less negative in all three seeds. However, weighted test
+   accuracy improved in only one of the three seeds.
 
-The leave-one-out variant compares each client with the aggregate of **the other clients only**. This removes the client's mechanical contribution to the direction against which it is evaluated.
+2. **A smaller update is not necessarily a better update.** Strong FedProx
+   (`mu = 1.0`) contracted updates even further but substantially reduced
+   weighted, macro, and worst-client accuracy. Constraining local movement can
+   suppress useful learning as well as harmful drift.
 
-![Pairwise alignment across training](results/client_update_geometry/alpha_0p1/figures/pairwise_alignment_heatmaps.png)
+3. **Direct drift correction was more effective in this setting.** Weighted
+   SCAFFOLD improved weighted accuracy relative to FedAvg in all three seeds.
+   Its mean leave-one-out alignment changed from `-0.175` under FedAvg to
+   `+0.523`, while mean pairwise similarity changed from approximately zero to
+   `0.410`. This is consistent with client updates reinforcing one another more
+   often instead of cancelling.
 
-## Experiment map
+4. **The improvement has a cost.** Under the full-vector accounting used here,
+   SCAFFOLD increases modeled communication from 4.07 MB to 8.14 MB per round
+   and adds 2.44 MB of control state across the server and five clients.
 
-The notebooks form one controlled research sequence:
+These are descriptive results from three seeds, not evidence that SCAFFOLD is
+universally better. They show what happened in this controlled setting and
+motivate a broader evaluation.
 
-| Experiment | Question | Notebook |
-|---|---|---|
-| 01. IID FedAvg | How do local epochs trade computation for communication? | [`01_fedavg_from_scratch.ipynb`](notebooks/01_fedavg_from_scratch.ipynb) |
-| 02. Shard non-IID | How does severe label concentration change FedAvg? | [`02_fedavg_shard_noniid.ipynb`](notebooks/02_fedavg_shard_noniid.ipynb) |
-| 03. Dirichlet non-IID | How does performance change as heterogeneity increases? | [`03_fedavg_dirichlet_noniid.ipynb`](notebooks/03_fedavg_dirichlet_noniid.ipynb) |
-| 04. FedProx | Can proximal regularization improve round-wise convergence? | [`04_fedprox_under_heterogeneity.ipynb`](notebooks/04_fedprox_under_heterogeneity.ipynb) |
-| 05. Update geometry | How does `mu` affect update magnitude and direction? | **[`05_client_update_geometry.ipynb`](notebooks/05_client_update_geometry.ipynb)** |
+![Comparison of update geometry across methods](results/scaffold_under_heterogeneity/figures/geometry_comparison.png)
 
-If you only open one notebook, start with **Experiment 05**. It contains the main research question, diagnostics, results, limitations, and reproducibility appendix.
+## How the methods differ
 
-## Controlled setup
+### FedProx: restrict how far clients move
+
+For client `i`, FedProx optimizes
+
+$$
+F_i(w) + \frac{\mu}{2}\lVert w-w_t\rVert_2^2,
+$$
+
+where `w_t` is the global model at the beginning of the round. The proximal
+term discourages the local model from moving too far from that reference.
+
+### SCAFFOLD: correct where clients move
+
+SCAFFOLD modifies the local gradient as
+
+$$
+g_i^{\mathrm{corrected}} = g_i + c - c_i,
+$$
+
+where `c` is the server control variate and `c_i` is the persistent control
+variate for client `i`. Intuitively, `c_i` remembers the client's characteristic
+gradient direction across rounds; the correction removes that local tendency
+and adds a shared global reference.
+
+A concise way I think about the difference is:
+
+> FedProx gives clients a speed limit. SCAFFOLD helps calibrate their compasses.
+
+The implementation uses the Option II client-control update
+
+$$
+c_i^+ = c_i-c+\frac{x-y_i}{K_i\eta},
+$$
+
+where `x-y_i` is the accumulated local descent direction and division by the
+number of local steps `K_i` and learning rate `eta` returns it to an average
+gradient scale. See [`docs/methodology.md`](docs/methodology.md) for a more
+detailed explanation.
+
+## Experimental design
+
+The final Notebook 06–07 comparison keeps the following setup fixed:
 
 | Setting | Value |
 |---|---|
-| Dataset | MNIST |
-| Clients | 5; full participation |
-| Model | MLP: 784 -> 128 -> 10 |
-| Optimizer | SGD, learning rate 0.01 |
+| Dataset | MNIST training collection |
+| Clients | 5, with full participation |
+| Heterogeneity | Dirichlet label partition, `alpha = 0.1` |
+| Per-client split | 80% train, 10% validation, 10% held-out test |
+| Model | MLP: `784 -> 128 -> 10`, ReLU |
+| Optimizer | SGD |
+| Learning rate | 0.01 |
 | Batch size | 64 |
+| Local epochs | 5 |
 | Communication rounds | 20 |
-| Main geometry setting | Dirichlet `alpha = 0.1`, `E = 5` |
-| FedProx coefficients | `mu in {0, 0.1, 1.0}` |
-| Seed | 42 |
+| Seeds | 42, 43, 44 |
+| FedProx coefficients | `mu in {0.0, 0.1, 1.0}` |
+| SCAFFOLD variant | Full participation, sample-size-weighted model and control aggregation |
 
-The `alpha = 0.1` split contains both label concentration and quantity imbalance. It is therefore described as **Dirichlet-induced statistical heterogeneity**, not pure label skew.
+Within each seed, all method conditions reuse the same partition, client
+splits, initial model state, and seeded minibatch schedule. The client-local
+test subsets are reserved for final evaluation. The official MNIST test split
+is intentionally not used in the final client-level comparison because it has
+no federated client identity.
 
-## Earlier results
+### Why sample-size weighting?
 
-### IID local-epoch sweep
+I use sample-size weighting so that each training example contributes equally
+to the pooled empirical objective. This is not an assumption that larger
+clients are inherently more important or more representative. Because this
+objective can still prioritize large clients, I report macro client accuracy,
+worst-client accuracy, and cross-client dispersion alongside weighted
+accuracy.
 
-| Local epochs `E` | Final accuracy |
-|---:|---:|
-| 1 | 92.33% |
-| 5 | 96.29% |
-| 10 | 97.25% |
+## What I measure beyond accuracy
 
-Increasing local computation improved progress per communication round under IID data.
+For client update `Delta_i = w_i - w_t`, the main diagnostics are:
 
-### Pathological shard non-IID
+| Diagnostic | Question |
+|---|---|
+| Relative update magnitude | How far did the client move relative to the global model scale? |
+| Pairwise cosine similarity | Do two clients move in similar directions? |
+| Leave-one-out alignment | Does one client's update agree with the weighted update of all other clients? |
 
-| Local epochs `E` | Final accuracy |
-|---:|---:|
-| 1 | 78.84% |
-| 5 | 79.98% |
-| 10 | 82.43% |
+These diagnostics help examine mechanism, but they are not independent
+statistical replicates and they do not prove that alignment causes accuracy.
 
-Local epochs still helped per round, but the improvement was much weaker than under IID data.
+## Notebook progression
 
-### FedProx under strong heterogeneity
+The repository keeps the early notebooks because they show how the final
+question developed, but the latest conclusions come from Notebooks 06 and 07.
 
-Moderate regularization improved the convergence trajectory, while `mu = 1` suppressed useful local learning. Final accuracy alone hid part of this effect, so Experiment 05 added round-wise geometric diagnostics.
+| Notebook | Purpose | Role |
+|---|---|---|
+| [`01_fedavg_from_scratch.ipynb`](notebooks/01_fedavg_from_scratch.ipynb) | Implement FedAvg and study local epochs under IID data | Foundation |
+| [`02_fedavg_shard_noniid.ipynb`](notebooks/02_fedavg_shard_noniid.ipynb) | Introduce pathological shard heterogeneity | Exploratory |
+| [`03_fedavg_dirichlet_noniid.ipynb`](notebooks/03_fedavg_dirichlet_noniid.ipynb) | Compare several Dirichlet concentrations | Exploratory |
+| [`04_fedprox_under_heterogeneity.ipynb`](notebooks/04_fedprox_under_heterogeneity.ipynb) | Add FedProx and run an initial coefficient sweep | Exploratory |
+| [`05_client_update_geometry.ipynb`](notebooks/05_client_update_geometry.ipynb) | Measure magnitude and directional agreement in one seeded environment | Mechanism study |
+| [`06_multiseed_fedprox_robustness.ipynb`](notebooks/06_multiseed_fedprox_robustness.ipynb) | Test whether the FedProx finding replicates across matched seeds | Canonical evidence |
+| [`07_scaffold_under_heterogeneity.ipynb`](notebooks/07_scaffold_under_heterogeneity.ipynb) | Compare weighted SCAFFOLD with the matched FedAvg and FedProx baselines | Canonical evidence |
 
-![Mean update magnitude](results/client_update_geometry/alpha_0p1/figures/mean_update_magnitude.png)
+For the final evidence, start with Notebooks 06 and 07. Notebook 05 is useful
+for understanding why I moved from final accuracy to client-update geometry.
 
 ## Repository structure
 
 ```text
 .
-├── notebooks/                     # Five experiments in research order
-├── src/
-│   ├── aggregate.py               # Sample-size-weighted server aggregation
-│   ├── data.py                    # IID, shard, and Dirichlet partitioning
-│   ├── diagnostics.py             # Vectorization, norms, cosine similarity
-│   ├── fedprox.py                 # FedProx local objective and training
-│   ├── models.py                  # SimpleMLP
-│   └── training.py                # Local training and evaluation utilities
-└── results/
-    ├── iid_baseline/
-    ├── shard_noniid/
-    ├── dirichlet_noniid/
-    ├── fedprox/
-    └── client_update_geometry/    # Raw diagnostics, summaries, and figures
+├── src/                              # Federated algorithms and utilities
+│   ├── aggregate.py                  # Sample-size-weighted aggregation
+│   ├── data.py                       # IID, shard, and Dirichlet partitioning
+│   ├── diagnostics.py                # Update vectorization and geometry
+│   ├── experiment.py                 # Matched FedAvg/FedProx runner
+│   ├── fedprox.py                    # FedProx local objective
+│   └── scaffold.py                   # Weighted SCAFFOLD and diagnostics
+├── notebooks/                        # Seven experiments in research order
+├── results/
+│   ├── client_update_geometry/       # Notebook 05 artifacts
+│   ├── multiseed_fedprox/            # Notebook 06 artifacts
+│   └── scaffold_under_heterogeneity/ # Notebook 07 artifacts
+├── docs/methodology.md               # Mathematical and design explanation
+└── tests/test_scaffold_invariants.py # Small deterministic correctness checks
 ```
 
-See [`notebooks/README.md`](notebooks/README.md) for the experiment guide and [`results/client_update_geometry/README.md`](results/client_update_geometry/README.md) for the diagnostic data dictionary.
+See [`results/README.md`](results/README.md) for the artifact map and column
+definitions, and [`notebooks/README.md`](notebooks/README.md) for execution
+guidance.
 
-## Reproducing the results
+## Inspecting or reproducing the study
 
 ```bash
 git clone https://github.com/khanhhuyenpham/federated-learning-under-heterogeneity.git
 cd federated-learning-under-heterogeneity
 
 python -m venv .venv
-# Windows: .venv\Scripts\activate
-# macOS/Linux: source .venv/bin/activate
 
-pip install -r requirements.txt
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
+
+# macOS/Linux
+source .venv/bin/activate
+
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
 jupyter lab
 ```
 
-Run the notebooks in numerical order. The completed CSV results, plots, initial weights, and important client partitions are checked into `results/`, so the analysis can be inspected without repeating the longest training runs.
+The canonical CSV files and figures are committed, so the analysis can be
+inspected without repeating the training runs. Expensive execution flags are
+disabled by default in the published notebooks. Use the restart-safe loaders
+in Notebooks 05–07 to regenerate tables and figures from the saved artifacts.
 
-Full sweeps are disabled by default in the polished notebooks where rerunning is expensive. Enable the corresponding run flag only when intentionally reproducing an experiment.
+The completed multi-seed experiments were run on Kaggle with Python 3.12.13,
+PyTorch 2.10.0+cu128, and one NVIDIA T4. A single seed-condition took roughly
+18 minutes in the baseline experiment, so a complete multi-seed sweep takes
+hours rather than minutes. Exact floating-point reproduction can still vary
+with hardware and backend behavior.
 
-## Experimental discipline
+## Correctness checks
 
-Controlled comparisons keep the following fixed unless they are the independent variable:
+The lightweight test suite checks identities that are central to the
+implementation:
 
-- initial global weights;
-- client partition;
-- model architecture;
-- optimizer, learning rate, and batch size;
-- communication rounds and local epochs;
-- random seed.
+- With zero control variates and matched batches, the first SCAFFOLD local
+  update matches FedAvg.
+- The Option II client-control update matches its closed-form expression on a
+  deterministic toy model.
+- Under full participation, the server control is consistent with the weighted
+  client controls.
+- Vectorized weighted aggregation matches parameter-wise aggregation.
 
-The implementation also verifies that FedProx with `mu = 0` reduces to the FedAvg local update under controlled minibatch ordering, and that the vector-averaged update matches parameter-wise server aggregation within floating-point tolerance.
+These tests run on synthetic data and do not download MNIST or launch a full
+federated experiment.
 
 ## Limitations
 
-- MNIST and a small MLP do not establish generality across tasks or architectures.
-- The main results use 5 fully participating clients and one seed.
-- Heterogeneity combines label concentration and unequal client sizes.
-- Cosine similarity is descriptive; association with accuracy does not prove causality.
-- The client-scaling experiment selects its target after inspecting the diagnostics.
+- The study uses MNIST and a small MLP; it does not establish behavior on
+  harder datasets or architectures.
+- Only three seeded federated environments, five clients, one Dirichlet
+  concentration, and one local-training regime are evaluated.
+- All clients participate in every round. Client dropout and system
+  heterogeneity are not modeled.
+- The client-local held-out sets are derived from the MNIST training
+  collection, so they do not test transfer to a new dataset or deployment.
+- Small client test sets make worst-client accuracy volatile, especially in
+  the most imbalanced partition.
+- This is a sample-size-weighted SCAFFOLD variant; other weighting rules may
+  optimize a different client-level objective.
+- Communication values count full model and control vectors but exclude
+  protocol overhead, compression, and secure aggregation.
+- Update geometry is mechanistically informative but does not independently
+  prove why a method improved accuracy.
 
-The next research step is replication across seeds, heterogeneity levels, client counts, and at least one harder dataset before proposing an adaptive aggregation rule.
+## What I would test next
+
+The next controlled experiment should change one factor at a time. I would
+first replace the MLP with a small CNN while reusing the saved client worlds,
+then expand to more clients, partial participation, and additional forms of
+heterogeneity. I would also compare communication required to reach a target
+accuracy rather than only communication over a fixed 20-round budget.
 
 ## References
 
-- McMahan et al., [Communication-Efficient Learning of Deep Networks from Decentralized Data](https://arxiv.org/abs/1602.05629), AISTATS 2017.
-- Li et al., [Federated Optimization in Heterogeneous Networks](https://arxiv.org/abs/1812.06127), MLSys 2020.
+- McMahan et al., [Communication-Efficient Learning of Deep Networks from
+  Decentralized Data](https://proceedings.mlr.press/v54/mcmahan17a.html),
+  AISTATS 2017.
+- Li et al., [Federated Optimization in Heterogeneous
+  Networks](https://arxiv.org/abs/1812.06127), MLSys 2020.
+- Karimireddy et al., [SCAFFOLD: Stochastic Controlled Averaging for Federated
+  Learning](https://proceedings.mlr.press/v119/karimireddy20a.html), ICML 2020.
 
-## Project status
+## License
 
-The five-experiment study is complete as a **single-seed research prototype**. The repository is now being extended toward multi-seed validation and a more general investigation of whether client-update geometry can support principled aggregation decisions.
+This project is available under the [MIT License](LICENSE).
+

@@ -44,7 +44,7 @@ def summarize_client_evaluations(
 
     if total_examples <= 0:
         raise ValueError("Cannot summarize an empty evaluation.")
-    
+
     return {
         "weighted_accuracy": total_correct / total_examples,
         "mean_client_accuracy": client_results["accuracy"].mean(),

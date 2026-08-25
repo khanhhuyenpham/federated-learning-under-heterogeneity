@@ -16,11 +16,11 @@ def train_one_epoch_fedprox(
     device: torch.device,
     mu: float,
 ) -> float:
-    """Train one local epoch with the student FedProx local objective.
+    """Train one local epoch with the FedProx local objective.
 
     Inputs:
         model: Local model being optimized on one client.
-        global_model: Fixed round-start global model reference.
+        global_params: Fixed round-start global parameter reference.
         loader: Client DataLoader.
         optimizer: Optimizer for the local model.
         loss_fn: Supervised data loss, such as CrossEntropyLoss.
@@ -33,12 +33,12 @@ def train_one_epoch_fedprox(
     model.train()
     total_loss = 0.0
     total_examples = 0
-    
+
     for xb, yb in loader:
         xb, yb = xb.to(device), yb.to(device)
         optimizer.zero_grad(set_to_none=True)
         logits = model(xb)
-    
+
         dist = torch.tensor(0.0, device=device)
         for local_param, global_param in zip(model.parameters(), global_params):
             dist = dist + ((local_param - global_param) ** 2).sum()
@@ -46,11 +46,11 @@ def train_one_epoch_fedprox(
         loss = loss_fn(logits, yb) + dist * mu / 2
         loss.backward()
         optimizer.step()
-    
+
         batch_size = yb.size(0)
         total_loss = total_loss + loss.item() * batch_size
         total_examples += batch_size
-    
+
     return total_loss / total_examples
 
 
@@ -78,17 +78,17 @@ def client_update_fedprox(
         A local model ready for server aggregation.
     """
     local_model = copy.deepcopy(global_model).to(device)
-    
+
     global_params = [
         p.detach().clone().to(device)
         for p in global_model.parameters()
     ]
-    
+
     optimizer = torch.optim.SGD(
         local_model.parameters(),
         lr=learning_rate
     )
-    
+
     for _ in range(local_epochs):
         train_one_epoch_fedprox(
             local_model,
@@ -99,7 +99,7 @@ def client_update_fedprox(
             device,
             mu,
         )
-    
+
     return local_model
 
 

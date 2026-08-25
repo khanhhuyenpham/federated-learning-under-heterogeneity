@@ -11,6 +11,6 @@
   "batch_size": 64,
   "learning_rate": 0.01,
   "num_workers": 0,
-  "baseline_results_dir": "/kaggle/working/federated-learning-under-heterogeneity/results/multiseed_fedprox",
-  "results_dir": "/kaggle/working/federated-learning-under-heterogeneity/results/scaffold_under_heterogeneity"
+  "baseline_results_dir": "results/multiseed_fedprox",
+  "results_dir": "results/scaffold_under_heterogeneity"
 }

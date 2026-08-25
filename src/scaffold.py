@@ -202,7 +202,7 @@ def client_update_scaffold(
             "global_model must already be on requested "
             f"device {expected_device}. but found {model_devices}"
         )
-    
+
     if local_epochs <= 0:
         raise ValueError(
             "local_epochs must be positive."
@@ -299,7 +299,7 @@ def update_server_control(
     control_deltas_by_id: Mapping[int, ControlState],
     client_weights_by_id: Mapping[int, float],
 ) -> ControlState:
-    if not control_deltas_by_id: 
+    if not control_deltas_by_id:
         raise ValueError(
             "At least one client control delta is required."
         )
