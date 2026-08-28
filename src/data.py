@@ -143,9 +143,13 @@ def summarize_partition(
             })
     return pd.DataFrame(client_rows)
 
-def create_client_loaders(train_ds, client_indices, batch_size: int, seed=None, shuffle=True,):
+def create_client_loaders(train_ds, client_indices, batch_size: int, seed=None, shuffle=True, client_feature_transforms=None):
     loaders = {}
     for client_id in sorted(client_indices):
+        feature_transform = None
+        if client_feature_transforms is not None:
+            feature_transform = client_feature_transforms.get(client_id)
+
         indices = client_indices[client_id]
 
         generator = None
@@ -154,7 +158,7 @@ def create_client_loaders(train_ds, client_indices, batch_size: int, seed=None, 
             generator.manual_seed(seed + int(client_id))
 
         loaders[client_id] = torch.utils.data.DataLoader(
-            torch.utils.data.Subset(train_ds, indices),
+            TransformedSubset(train_ds, indices, feature_transform),
             batch_size = batch_size,
             shuffle=shuffle,
             generator=generator,
@@ -298,3 +302,76 @@ def partition_label_skew_balanced(
 
     return client_indices
 
+def partition_quantity_skew(
+    train_ds,
+    num_clients: int,
+    alpha: float,
+    seed: int,
+    min_samples_per_client: int = 1,
+) -> dict[int, list[int]]:
+    if num_clients <= 0:
+        raise ValueError("num_clients must be positive")
+
+    if alpha <= 0:
+        raise ValueError("alpha must be positive")
+
+    if min_samples_per_client <= 0:
+        raise ValueError("min_samples_per_client must be positive")
+
+    dataset_size = len(train_ds)
+    if num_clients > dataset_size:
+        raise ValueError("num_clients cannot exceed dataset size when clients must be non-empty")
+
+    if num_clients * min_samples_per_client > dataset_size:
+        raise ValueError("minimum allocation cannot exceed dataset size")
+    
+    rng = np.random.default_rng(seed=seed)
+
+    capacities = np.full(
+        num_clients,
+        min_samples_per_client,
+        dtype=int,
+    )
+
+    reserved_samples = num_clients * min_samples_per_client
+    remaining_samples = dataset_size - reserved_samples
+
+    client_probabilities = rng.dirichlet(np.full(num_clients, alpha))
+    additional_counts = rng.multinomial(
+        remaining_samples,
+        client_probabilities,
+    )
+    capacities += additional_counts
+
+    shuffled_indices = rng.permutation(dataset_size)
+    split_points = np.cumsum(capacities)[:-1]
+
+    client_splits = np.split(
+        shuffled_indices,
+        split_points,
+    )
+
+    assert len(capacities) == num_clients
+    assert int(capacities.sum()) == dataset_size
+    assert np.all(capacities >= min_samples_per_client)
+    return {client_id : split.tolist() for client_id, split in enumerate(client_splits)}
+
+class TransformedSubset(torch.utils.data.Dataset):
+    def __init__(
+        self, 
+        base_dataset,
+        indices,
+        feature_transform=None,
+    ):
+        self.base_dataset = base_dataset
+        self.indices = [int(index) for index in indices]
+        self.feature_transform = feature_transform
+
+    def __len__(self):
+        return len(self.indices)
+
+    def __getitem__(self, position):
+        features, label = self.base_dataset[self.indices[position]]
+        if self.feature_transform is not None:
+            features = self.feature_transform(features)
+        return features, label

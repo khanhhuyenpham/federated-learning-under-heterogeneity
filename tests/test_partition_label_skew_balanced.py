@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 import torch
-
+import numpy as np
 from src.data import summarize_partition, validate_partition, partition_label_skew_balanced
 
 
@@ -157,3 +157,4 @@ def test_smaller_alpha_produces_stronger_label_skew():
     )
 
     assert skewed_dominance > uniform_dominance
+
