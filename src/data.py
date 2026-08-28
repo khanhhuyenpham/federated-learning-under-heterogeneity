@@ -2,6 +2,7 @@
 import torch
 import pandas as pd
 import numpy as np
+from collections import Counter
 
 def partition_shard(train_ds, num_clients : int, seed : int, shard_per_client : int):
     generator = torch.Generator().manual_seed(seed)
@@ -82,6 +83,66 @@ def partition_iid(train_ds, num_clients: int, seed: int):
     splits = torch.tensor_split(shuffled, num_clients)
     return {client_id: split.tolist() for client_id, split in enumerate(splits)}
 
+def validate_partition(
+    client_indices,
+    dataset_size: int,
+    expected_num_clients: int | None = None,
+    require_full_coverage: bool = True,
+    require_non_empty_clients: bool = True,
+) -> None:
+    if dataset_size <= 0:
+        raise ValueError("dataset_size needs to be positive")
+
+    actual_client_ids = set(client_indices.keys())
+
+    if expected_num_clients is not None:
+        if expected_num_clients <= 0:
+            raise ValueError("expected_num_clients needs to be positive")
+        expected_client_ids = set(range(expected_num_clients))
+        if actual_client_ids != expected_client_ids:
+            raise ValueError(f"Expected client IDs {expected_client_ids} but received {actual_client_ids}")
+
+    all_sample_indices = []
+    for client_id in actual_client_ids:
+        if require_non_empty_clients and not client_indices[client_id]:
+            raise ValueError("empty client detected")
+        all_sample_indices.extend(client_indices[client_id])
+
+    if len(set(all_sample_indices)) != len(all_sample_indices):
+        raise ValueError("duplicate sample indices detected")
+    
+    for sample_idx in all_sample_indices:
+        if sample_idx < 0 or sample_idx >= dataset_size: 
+            raise ValueError("index out of range")
+        
+    if require_full_coverage:
+        if set(all_sample_indices) != set(range(dataset_size)):
+            raise ValueError("full_coverage not met")
+
+def summarize_partition(
+    train_ds, 
+    client_indices,
+) -> pd.DataFrame:
+    client_rows = []
+    class_ids = sorted(set(train_ds.targets.tolist()))
+    for client_id, indices in client_indices.items():
+        client_targets = train_ds.targets[indices].tolist()
+        class_counts = Counter(client_targets)
+        client_size = len(indices)
+        if client_size == 0:
+            raise ValueError(f"client {client_id} has no assigned samples")
+        
+        for class_id in class_ids:
+            cnt = class_counts.get(class_id, 0)
+            client_rows.append({
+                "client_id": client_id,
+                "class_id": class_id,
+                "count": cnt,
+                "proportion": cnt / client_size,
+                "client_size": client_size,
+            })
+    return pd.DataFrame(client_rows)
+
 def create_client_loaders(train_ds, client_indices, batch_size: int, seed=None, shuffle=True,):
     loaders = {}
     for client_id in sorted(client_indices):
@@ -157,3 +218,83 @@ def split_client_indices(client_indices, train_fraction=0.8, validation_fraction
         client_test_indices,
     )
         
+def partition_label_skew_balanced(
+    train_ds,
+    num_clients: int,
+    alpha: float,
+    seed: int,
+):
+    """Partition data with Dirichlet label skew and balanced client sizes."""
+    if num_clients <= 0:
+        raise ValueError("num_clients must be positive")
+
+    if alpha <= 0:
+        raise ValueError("alpha must be positive")
+
+    dataset_size = len(train_ds)
+    if num_clients > dataset_size:
+        raise ValueError("num_clients cannot exceed dataset size when clients must be non-empty")
+
+    rng = np.random.default_rng(seed=seed)
+    targets = train_ds.targets.cpu().numpy()
+
+    classes = np.unique(targets)
+
+    remainder = dataset_size % num_clients
+    capacities = [dataset_size // num_clients] * num_clients
+
+    client_indices = {
+        client_id : []
+        for client_id in range(num_clients)
+    }
+
+    class_pools = {
+        class_id : []
+        for class_id in classes
+    }
+
+    for client_id in range(remainder):
+        capacities[client_id] += 1
+
+    for class_id in classes:
+        class_indices = np.flatnonzero(targets == class_id)
+        rng.shuffle(class_indices)
+        class_pools[class_id] = class_indices.tolist()
+
+
+    client_vectors = {
+        client_id : rng.dirichlet(np.full(len(classes), alpha)) 
+        for client_id in range(num_clients)
+    }
+
+    while any(capacity > 0 for capacity in capacities):
+        for client_id in range(num_clients):
+            if capacities[client_id] == 0: continue
+
+            available_mask = np.array(
+                [bool(class_pools[class_id]) for class_id in classes],
+                dtype=bool,
+            )
+
+            if not available_mask.any():
+                raise RuntimeError(
+                    "No samples remain, but at least one client still has capacity"
+                )
+
+            client_vector = client_vectors[client_id].copy()
+            client_vector[~available_mask] = 0.0
+
+            probability_sum = client_vector.sum()
+
+            if not np.isfinite(probability_sum) or probability_sum <= 0:
+                client_vector = available_mask.astype(float)
+                probability_sum = client_vector.sum()
+
+            normalized_client_vector = client_vector / np.sum(client_vector)
+            class_chosen = rng.choice(classes, p=normalized_client_vector)
+            sample_idx = class_pools[class_chosen].pop()
+            client_indices[client_id].append(sample_idx)
+            capacities[client_id] -= 1
+
+    return client_indices
+
