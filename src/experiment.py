@@ -225,8 +225,24 @@ def run_experiment(
         validation_loaders,
         loss_fn,
         device,
+        client_feature_transforms=None,
         verbose: bool = False,
 ):
+    train_client_ids = set(client_train_indices)
+    validation_client_ids = set(validation_loaders)
+
+    if not train_client_ids:
+        raise ValueError(
+            "Client training partition cannot be empty"
+        )
+
+    if train_client_ids != validation_client_ids:
+        raise ValueError(
+            "Training and validation loaders must have "
+            "identical client IDs. "
+            f"Training IDs: {train_client_ids}; "
+            f"validation IDs: {validation_client_ids}"
+        )
     performance_rows = []
     client_performance_rows = []
     client_update_rows = []
@@ -239,7 +255,16 @@ def run_experiment(
     for mu_value in mu_values:
         set_seed(config.seed)
         global_model = copy.deepcopy(initial_model).to(device)
-        client_loaders = create_client_loaders(train_ds, client_train_indices, config.batch_size, config.seed, True)
+        client_loaders = create_client_loaders(
+            train_ds=train_ds,
+            client_indices=client_train_indices,
+            batch_size=config.batch_size,
+            seed=config.seed,
+            shuffle=True,
+            client_feature_transforms=(
+                client_feature_transforms
+            ),
+        )
         client_rows, summary = evaluate_client_loaders(global_model, validation_loaders, loss_fn, device)
         if verbose:
             print(
@@ -319,7 +344,7 @@ def run_experiment(
             name: tensor.detach().cpu().clone()
             for name, tensor in global_model.state_dict().items()
         }
-
+    
     result = RunResult(
         performance_history=pd.DataFrame(performance_rows),
         client_performance_history=pd.DataFrame(client_performance_rows),

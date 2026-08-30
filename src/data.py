@@ -3,6 +3,67 @@ import torch
 import pandas as pd
 import numpy as np
 from collections import Counter
+from dataclasses import dataclass
+from torch.utils.data import DataLoader
+
+@dataclass
+class ClientSplitLoaders:
+    train: dict[int, DataLoader]
+    validation: dict[int, DataLoader]
+    test: dict[int, DataLoader]
+
+def create_client_split_loaders(
+    train_ds,
+    client_train_indices,
+    client_validation_indices,
+    client_test_indices,
+    batch_size: int,
+    seed: int,
+    client_feature_transforms=None,
+) -> ClientSplitLoaders:
+    train_client_ids = set(client_train_indices)
+    validation_client_ids = set(client_validation_indices)
+    test_client_ids = set(client_test_indices)
+
+    if not (
+        train_client_ids
+        == validation_client_ids
+        == test_client_ids
+    ):
+        raise ValueError(
+            "Train, validation, and test splits must have identical client IDs"
+        )
+    
+    train_loaders = create_client_loaders(
+        train_ds=train_ds,
+        client_indices=client_train_indices,
+        batch_size=batch_size,
+        seed=seed,
+        shuffle=True,
+        client_feature_transforms=client_feature_transforms
+    )
+    validation_loaders = create_client_loaders(
+        train_ds=train_ds,
+        client_indices=client_validation_indices,
+        batch_size=batch_size,
+        seed=seed,
+        shuffle=False,
+        client_feature_transforms=client_feature_transforms
+    )
+    test_loaders = create_client_loaders(
+        train_ds=train_ds,
+        client_indices=client_test_indices,
+        batch_size=batch_size,
+        seed=seed,
+        shuffle=False,
+        client_feature_transforms=client_feature_transforms
+    )
+
+    return ClientSplitLoaders(
+        train=train_loaders,
+        validation=validation_loaders,
+        test=test_loaders,
+    )
 
 def partition_shard(train_ds, num_clients : int, seed : int, shard_per_client : int):
     generator = torch.Generator().manual_seed(seed)

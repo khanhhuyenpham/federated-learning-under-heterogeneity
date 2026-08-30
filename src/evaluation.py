@@ -51,3 +51,39 @@ def summarize_client_evaluations(
         "worst_client_accuracy": client_results["accuracy"].min(),
         "std_client_accuracy": client_results["accuracy"].std(ddof=0),
     }
+
+def create_global_test_loader(
+    test_ds,
+    batch_size: int,
+) -> DataLoader:
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+    if len(test_ds) == 0:
+        raise ValueError("test_ds must be nonempty")
+
+    return DataLoader(
+        dataset=test_ds,
+        batch_size=batch_size,
+        shuffle=False
+    )
+
+def evaluate_global_model(
+    model: nn.Module,
+    global_test_loader: DataLoader,
+    device: torch.device,
+) -> dict:
+    correct, total = accuracy_on_loader(
+        model=model,
+        loader=global_test_loader,
+        device=device,
+    )
+    if total == 0:
+        raise ValueError(
+            "cannot evaluate an empty global test loader"
+        )
+
+    return {
+        "global_test_correct": correct,
+        "global_test_total": total,
+        "global_test_accuracy": correct/total,
+    }
