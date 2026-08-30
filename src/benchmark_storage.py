@@ -218,6 +218,41 @@ def make_run_key(
         mu=algorithm_spec.mu,
     )
 
+def _make_run_key_from_result(
+    result: BenchmarkRunResult,
+) -> BenchmarkRunKey:
+    metadata = result.condition_metadata
+
+    return BenchmarkRunKey(
+        mode=metadata.mode,
+        seed=result.seed,
+        num_clients=metadata.num_clients,
+        alpha=metadata.alpha,
+        min_samples_per_client=(
+            metadata.min_samples_per_client
+        ),
+        max_abs_angle=metadata.max_abs_angle,
+        algorithm=result.algorithm,
+        mu=result.mu,
+    )
+
+def _run_key_mismatches(
+    *,
+    requested_key: BenchmarkRunKey,
+    result_key: BenchmarkRunKey,
+) -> dict:
+    requested = asdict(requested_key)
+    result = asdict(result_key)
+
+    return {
+        field: {
+            "requested": requested[field],
+            "result": result[field],
+        }
+        for field in requested
+        if requested[field] != result[field]
+    }
+
 def _read_json(path: Path):
     return json.loads(
         path.read_text(encoding="utf-8")
@@ -398,27 +433,20 @@ class BenchmarkRunStore:
         key: BenchmarkRunKey,
         result: BenchmarkRunResult,
     ) -> None:
-        metadata = result.condition_metadata
-
-        expected_key = BenchmarkRunKey(
-            mode=metadata.mode,
-            seed=result.seed,
-            num_clients=metadata.num_clients,
-            alpha=metadata.alpha,
-            min_samples_per_client=(
-                metadata.min_samples_per_client
-            ),
-            max_abs_angle=(
-                metadata.max_abs_angle
-            ),
-            algorithm=result.algorithm,
-            mu=result.mu,
+        result_key = _make_run_key_from_result(
+            result
         )
 
-        if key != expected_key:
+        mismatches = _run_key_mismatches(
+            requested_key=key,
+            result_key=result_key,
+        )
+
+        if mismatches:
             raise ValueError(
                 "Benchmark run key does not match "
-                "the supplied result"
+                "the supplied result. "
+                f"Mismatches: {mismatches}"
             )
 
     def is_spec_complete(

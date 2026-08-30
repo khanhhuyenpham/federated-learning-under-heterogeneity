@@ -39,14 +39,10 @@ def build_condition_metadata(
     num_clients = config.num_clients
 
     alpha = None
-    min_samples_per_client = None
-    max_abs_angle = None
+    min_samples_per_client = config.min_samples_per_client
+    max_abs_angle = config.max_abs_angle
     if mode == "label_skew" or mode == "quantity_skew":
         alpha = config.alpha
-    if mode == "quantity_skew":
-        min_samples_per_client = config.min_samples_per_client
-    if mode == "rotation_shift":
-        max_abs_angle = config.max_abs_angle
     
     dataset_size = len(train_ds)
     client_sizes = [len(indices) for indices in federated_data.client_indices.values()]

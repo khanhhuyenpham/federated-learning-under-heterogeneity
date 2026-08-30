@@ -1,5 +1,6 @@
 import re
 import json
+from dataclasses import asdict
 from pathlib import Path
 import pytest
 
@@ -7,17 +8,25 @@ from src.benchmark_storage import (
     BenchmarkRunKey,
     BenchmarkRunStore,
     _format_optional_float,
+    _make_run_key_from_result,
+    _run_key_mismatches,
     make_run_key,
 )
 from src.benchmark_suite import AlgorithmSpec
 from src.heterogeneity import HeterogeneityConfig
+from src.benchmark_protocol import (
+    build_fedprox_pilot_algorithms,
+    build_fedprox_pilot_conditions,
+)
 
 import pandas as pd
 import torch
 from torch import nn
 
 from src.benchmark_results import BenchmarkRunResult
+from src.condition_metadata import build_condition_metadata
 from src.condition_metadata import ConditionMetadata
+from src.heterogeneity import build_federated_data
 
 
 def make_label_skew_config(
@@ -583,6 +592,76 @@ def make_storage_result(
         },
     )
 
+class TinyPilotDataset:
+    def __init__(self):
+        self.targets = torch.tensor(
+            [label for label in range(5)] * 10,
+            dtype=torch.long,
+        )
+
+    def __len__(self):
+        return len(self.targets)
+
+    def __getitem__(self, index):
+        return (
+            torch.tensor(
+                [float(index)],
+                dtype=torch.float32,
+            ),
+            self.targets[index],
+        )
+
+def test_real_pilot_condition_key_matches_result_metadata_key():
+    condition_config = (
+        build_fedprox_pilot_conditions()[0]
+    )
+    algorithm_spec = (
+        build_fedprox_pilot_algorithms()[1]
+    )
+    dataset = TinyPilotDataset()
+    federated_data = build_federated_data(
+        train_ds=dataset,
+        config=condition_config,
+    )
+    metadata = build_condition_metadata(
+        train_ds=dataset,
+        config=condition_config,
+        federated_data=federated_data,
+    )
+
+    requested_key = make_run_key(
+        condition_config=condition_config,
+        algorithm_spec=algorithm_spec,
+    )
+
+    result = make_storage_result(
+        algorithm=algorithm_spec.algorithm,
+        mu=algorithm_spec.mu,
+        seed=condition_config.seed,
+    )
+    result.condition_metadata = metadata
+
+    result_key = _make_run_key_from_result(result)
+    mismatches = _run_key_mismatches(
+        requested_key=requested_key,
+        result_key=result_key,
+    )
+
+    assert asdict(requested_key) == {
+        "mode": "label_skew",
+        "seed": 42,
+        "num_clients": 5,
+        "alpha": 0.1,
+        "min_samples_per_client": 1,
+        "max_abs_angle": 0.0,
+        "algorithm": "fedprox",
+        "mu": 0.1,
+    }
+    assert asdict(result_key) == asdict(
+        requested_key
+    )
+    assert mismatches == {}
+
 def test_store_saves_complete_run(
     tmp_path,
 ):
@@ -766,12 +845,15 @@ def test_store_rejects_key_result_mismatch(
     with pytest.raises(
         ValueError,
         match="does not match",
-    ):
+    ) as error:
         store.save(
             key=key,
             result=mismatched_result,
         )
 
+    assert "Mismatches" in str(error.value)
+    assert "algorithm" in str(error.value)
+    assert "mu" in str(error.value)
     assert not store.run_directory(key).exists()
 
 def test_failed_save_removes_temporary_directory(
