@@ -1,222 +1,335 @@
 # Federated Optimization Under Statistical Heterogeneity
 
-From-scratch PyTorch implementations of FedAvg, FedProx, and a
-sample-size-weighted SCAFFOLD variant, studied under controlled heterogeneous
-MNIST partitions.
+I built this project to understand what actually goes wrong when federated
+clients do not see the same data.
 
-I started this project because I did not want to treat federated learning
-algorithms as black boxes or judge them only by final accuracy. My initial
-intuition was that client drift might be controlled by limiting how far each
-client moves from the global model. That led me from FedAvg to FedProx, and then
-to measuring the client updates themselves: their magnitude, their directional
-agreement, and how much they reinforce or cancel one another.
+At first, my question was fairly simple: if non-IID clients pull a global model
+in conflicting directions, can FedProx help by preventing each local model from
+moving too far? Implementing FedProx led me to inspect the updates themselves—not
+only their final accuracy, but also their magnitude, pairwise similarity, and
+alignment with the update produced by the other clients.
 
-The multi-seed results changed my understanding. FedProx reliably made updates
-smaller, but that did not reliably improve the global model. I therefore
-implemented SCAFFOLD to test a different idea: correcting client-specific drift
-instead of only restricting local movement.
+The results changed the direction of the project. FedProx reliably made local
+updates smaller, yet smaller updates did not reliably produce a better global
+model. I then implemented SCAFFOLD to test a different idea: correct systematic
+client drift instead of merely limiting local movement. Finally, I expanded the
+study beyond one severe label-skew setting and asked whether the same conclusions
+survive different types and severities of heterogeneity.
 
-Here, “from scratch” means that the federated optimization logic is implemented
-directly in PyTorch without Flower, TensorFlow Federated, or another federated
-learning framework.
+The final study compares **FedAvg, FedProx, and SCAFFOLD across 63 matched runs**
+on MNIST. It covers label imbalance, client-size imbalance, and client-specific
+rotation shifts over seeds 42, 43, and 44. The federated optimization logic is
+implemented directly in PyTorch, without Flower, TensorFlow Federated, or another
+federated learning framework.
 
-## Research question
+## The question I ended up asking
 
-> Under strong statistical heterogeneity, is constraining local deviation
-> enough to improve federated optimization, or is explicitly correcting client
-> drift more effective?
+> When does correcting client drift improve federated learning—and when does the
+> type of heterogeneity matter more than the choice of optimizer?
 
-I compare three approaches:
+I use the benchmark to examine four related questions:
 
-- **FedAvg:** average the clients' locally trained models.
-- **FedProx:** add a proximal penalty that keeps local models close to the
-  current global model.
-- **SCAFFOLD:** maintain server and client control variates that correct
-  systematic drift in local gradients.
+1. Do FedAvg, FedProx, and SCAFFOLD react differently to label, quantity, and
+   feature heterogeneity?
+2. Does increasing the severity of a shift change the method ranking?
+3. Are the conclusions stable across matched random seeds?
+4. Do clean global accuracy, client-local accuracy, worst-client accuracy,
+   convergence, and runtime tell the same story?
 
-## Main results
+## Final benchmark
 
-The final comparison uses three matched seeded federated environments. Each
-seed determines one client partition, train/validation/test split, initial
-model, and minibatch schedule. The seed—not a client or communication round—is
-the experimental unit.
+The benchmark contains seven conditions per seed:
 
-| Method | Weighted test accuracy | Macro client accuracy | Worst-client accuracy | Within-seed client SD |
-|---|---:|---:|---:|---:|
-| FedAvg | 91.74 ± 1.22% | 89.34 ± 3.38% | 82.91 ± 6.93% | 4.45 ± 2.03% |
-| FedProx (`mu = 0.1`) | 91.47 ± 1.39% | 89.68 ± 2.96% | 84.87 ± 3.93% | 3.57 ± 0.99% |
-| FedProx (`mu = 1.0`) | 87.89 ± 2.02% | 84.34 ± 6.05% | 73.38 ± 14.10% | 6.48 ± 4.31% |
-| Weighted SCAFFOLD | **94.87 ± 0.39%** | **94.12 ± 0.76%** | **90.92 ± 1.07%** | **2.24 ± 0.55%** |
+| Heterogeneity | Conditions | What changes between clients |
+|---|---|---|
+| Control | IID | Neither label mix, sample count, nor image orientation is intentionally shifted |
+| Label skew | Dirichlet `alpha = 0.5` and `0.1` | Label proportions, while client sizes remain balanced |
+| Quantity skew | Dirichlet `alpha = 0.5` and `0.1` | Client sample counts, with at least 100 examples per client |
+| Rotation shift | `±10°` and `±20°` | A fixed client-specific rotation applied to train, validation, and local-test images |
 
-Values are mean ± sample standard deviation across `n = 3` seeds. “Macro”
-gives each client equal weight; weighted accuracy gives each held-out example
-equal weight. The within-seed client SD measures dispersion across the five
-client accuracies and is then summarized across seeds.
+For each condition, all three algorithms receive the same client partition,
+train/validation/test split, initial model weights, and seeded minibatch schedule.
+Only the heterogeneity condition, seed, and optimization method change.
 
-![Matched validation trajectories for FedAvg, FedProx, and SCAFFOLD](results/scaffold_under_heterogeneity/figures/validation_trajectories.png)
+This gives:
 
-### What I conclude from these results
+```text
+7 conditions x 3 seeds x 3 algorithms = 63 runs
+```
 
-1. **FedProx changed the optimization geometry more consistently than it
-   changed performance.** With `mu = 0.1`, median relative update magnitude
-   decreased in all three seeds, by 13.6% on average. Leave-one-out alignment
-   also became less negative in all three seeds. However, weighted test
-   accuracy improved in only one of the three seeds.
+### Clean global test accuracy
 
-2. **A smaller update is not necessarily a better update.** Strong FedProx
-   (`mu = 1.0`) contracted updates even further but substantially reduced
-   weighted, macro, and worst-client accuracy. Constraining local movement can
-   suppress useful learning as well as harmful drift.
+The table below reports mean accuracy ± sample standard deviation
+across the three seeds on the official, untransformed MNIST test set.
 
-3. **Direct drift correction was more effective in this setting.** Weighted
-   SCAFFOLD improved weighted accuracy relative to FedAvg in all three seeds.
-   Its mean leave-one-out alignment changed from `-0.175` under FedAvg to
-   `+0.523`, while mean pairwise similarity changed from approximately zero to
-   `0.410`. This is consistent with client updates reinforcing one another more
-   often instead of cancelling.
+| Condition | FedAvg | FedProx (`mu = 0.01`) | SCAFFOLD |
+|---|---:|---:|---:|
+| IID | 90.47 ± 0.09% | 90.46 ± 0.08% | 90.48 ± 0.08% |
+| Label skew, `alpha = 0.5` | 89.57 ± 0.22% | 89.57 ± 0.22% | **90.34 ± 0.13%** |
+| Label skew, `alpha = 0.1` | 86.03 ± 2.61% | 85.99 ± 2.64% | **90.14 ± 0.15%** |
+| Quantity skew, `alpha = 0.5` | 92.09 ± 0.65% | 92.07 ± 0.61% | 92.12 ± 0.64% |
+| Quantity skew, `alpha = 0.1` | 92.94 ± 0.78% | 92.89 ± 0.77% | 92.95 ± 0.78% |
+| Rotation shift, `±10°` | 90.26 ± 0.17% | 90.25 ± 0.17% | 90.27 ± 0.16% |
+| Rotation shift, `±20°` | **89.42 ± 0.06%** | 89.39 ± 0.08% | 89.25 ± 0.13% |
 
-4. **The improvement has a cost.** Under the full-vector accounting used here,
-   SCAFFOLD increases modeled communication from 4.07 MB to 8.14 MB per round
-   and adds 2.44 MB of control state across the server and five clients.
+![Global test accuracy across benchmark conditions](results/balanced_benchmark_v1/analysis/figures/global_accuracy_by_condition.png)
 
-These are descriptive results from three seeds, not evidence that SCAFFOLD is
-universally better. They show what happened in this controlled setting and
-motivate a broader evaluation.
+## What I learned
 
-![Comparison of update geometry across methods](results/scaffold_under_heterogeneity/figures/geometry_comparison.png)
+### 1. SCAFFOLD's advantage was specific, not universal
 
-## How the methods differ
+The clearest separation appeared under label skew. At `alpha = 0.1`, SCAFFOLD
+improved mean clean global accuracy by **4.11 percentage points** over FedAvg and
+reduced the across-seed standard deviation from **2.61 to 0.15 percentage
+points**. Its mean worst-client local accuracy was also substantially higher:
+87.42% versus 76.14% for FedAvg.
 
-### FedProx: restrict how far clients move
+This pattern was already visible at the milder `alpha = 0.5`, but the gap became
+larger as the realized label imbalance increased. That is consistent with
+SCAFFOLD helping when clients repeatedly optimize toward different label-driven
+objectives.
 
-For client `i`, FedProx optimizes
+Across all 21 matched condition-seed pairs, SCAFFOLD beat FedAvg on clean global
+accuracy 14 times, tied twice, and lost five times. The average paired difference
+was +0.68 percentage points—but that average hides an important fact: most of
+the gain came from label skew.
+
+The wall-clock difference was small in this single-machine simulation: mean
+runtime per run was about 223 seconds for FedAvg, 223 seconds for FedProx, and
+226 seconds for SCAFFOLD. That should not be mistaken for equal communication
+cost. Under the full-vector accounting used here, SCAFFOLD transmits both model
+and control vectors, doubling the modeled traffic from 4.07 MB to 8.14 MB per
+round and maintaining 2.44 MB of control state across the server and five
+clients.
+
+### 2. Quantity imbalance alone did not create the same optimization problem
+
+The severe quantity-skew setting was genuinely imbalanced: its mean realized
+client-size coefficient of variation was 1.48, and client sizes ranged from the
+100-example minimum to more than 46,000 examples in some seeded partitions.
+Nevertheless, the realized label-distribution shift remained small, with mean
+label total-variation distance around 0.054.
+
+Under full participation and sample-size-weighted aggregation, all three methods
+therefore behaved almost identically. A small client and a large client saw
+different amounts of data, but not strongly conflicting label objectives. This
+was a useful correction to my initial intuition: **more imbalance does not
+automatically mean more client drift**.
+
+### 3. The evaluation distribution can change the conclusion
+
+Under the stronger `±20°` rotation shift, SCAFFOLD was slightly worse on
+the clean global MNIST test set than FedAvg (89.25% versus 89.42%). On the
+rotated client-local test sets, however, it achieved better weighted accuracy
+(85.94% versus 85.64%) and better worst-client accuracy (82.42% versus 81.72%).
+
+Neither number is the single “correct” answer. The clean test measures transfer
+back to the original MNIST distribution; the local tests measure service to the
+actual shifted client environments. Reporting both exposed a trade-off that one
+aggregate score would have hidden.
+
+### 4. FedProx was not a free improvement over FedAvg
+
+Before the main benchmark, I ran a prespecified pilot under severe balanced
+label skew using `mu` in `{0.01, 0.1, 1.0}`. The selection rule used the final
+five-round validation mean across seeds. Candidates within 0.25 percentage
+points of the best mean were compared by across-seed stability, then by the
+smaller `mu`. This rule selected `mu = 0.01`:
+
+| `mu` | Mean tail validation accuracy | Across-seed SD |
+|---:|---:|---:|
+| **0.01** | **84.50%** | **2.07%** |
+| 0.1 | 84.30% | 2.11% |
+| 1.0 | 82.25% | 2.33% |
+
+After fixing that value before the main comparison, FedProx remained almost
+indistinguishable from FedAvg. Its average paired clean-test difference was
+-0.02 percentage points across the 21 condition-seed pairs. Stronger proximal
+regularization had already performed worse in the pilot.
+
+My conclusion is not that FedProx is ineffective in general. In this protocol,
+one local epoch already limits client drift, so a small proximal term changes
+little while a large one can suppress useful learning.
+
+### 5. Raw parameters are not enough to describe heterogeneity
+
+The same Dirichlet `alpha` can govern different random objects. In label skew it
+changes class proportions; in quantity skew it changes client sizes. I therefore
+store realized descriptors with every run:
+
+| Condition | Quantity CV | Mean label TVD | Rotation SD |
+|---|---:|---:|---:|
+| IID | 0.000 | 0.010 | 0.00 degrees |
+| Label `alpha = 0.5` | 0.000 | 0.373 | 0.00 degrees |
+| Label `alpha = 0.1` | 0.000 | 0.514 | 0.00 degrees |
+| Quantity `alpha = 0.5` | 1.030 | 0.029 | 0.00 degrees |
+| Quantity `alpha = 0.1` | 1.481 | 0.054 | 0.00 degrees |
+| Rotation `±10°` | 0.000 | 0.010 | 7.07° |
+| Rotation `±20°` | 0.000 | 0.010 | 14.14° |
+
+These are averages across the three seeded conditions. They make it possible to
+interpret what each synthetic setting actually produced, rather than treating
+its configuration label as the evidence.
+
+## FedProx and SCAFFOLD in plain language
+
+FedProx adds a proximal penalty to each client's local objective:
 
 $$
-F_i(w) + \frac{\mu}{2}\lVert w-w_t\rVert_2^2,
+F_i(w) + \frac{\mu}{2}\lVert w-w_t\rVert_2^2.
 $$
 
-where `w_t` is the global model at the beginning of the round. The proximal
-term discourages the local model from moving too far from that reference.
+The penalty discourages the local model from moving too far from the global
+model `w_t` received at the start of the round.
 
-### SCAFFOLD: correct where clients move
-
-SCAFFOLD modifies the local gradient as
+SCAFFOLD instead corrects the local gradient:
 
 $$
 g_i^{\mathrm{corrected}} = g_i + c - c_i,
 $$
 
 where `c` is the server control variate and `c_i` is the persistent control
-variate for client `i`. Intuitively, `c_i` remembers the client's characteristic
-gradient direction across rounds; the correction removes that local tendency
-and adds a shared global reference.
+variate for client `i`. The control states estimate and compensate for
+client-specific drift across rounds.
 
-A concise way I think about the difference is:
+The distinction that helped me reason about them is:
 
 > FedProx gives clients a speed limit. SCAFFOLD helps calibrate their compasses.
 
-The implementation uses the Option II client-control update
+The implementation uses full participation, sample-size-weighted model
+aggregation, and sample-size-weighted control aggregation. A more detailed
+derivation is available in [`docs/methodology.md`](docs/methodology.md).
 
-$$
-c_i^+ = c_i-c+\frac{x-y_i}{K_i\eta},
-$$
-
-where `x-y_i` is the accumulated local descent direction and division by the
-number of local steps `K_i` and learning rate `eta` returns it to an average
-gradient scale. See [`docs/methodology.md`](docs/methodology.md) for a more
-detailed explanation.
-
-## Experimental design
-
-The final Notebook 06–07 comparison keeps the following setup fixed:
+## Experimental protocol
 
 | Setting | Value |
 |---|---|
-| Dataset | MNIST training collection |
+| Dataset | MNIST |
 | Clients | 5, with full participation |
-| Heterogeneity | Dirichlet label partition, `alpha = 0.1` |
-| Per-client split | 80% train, 10% validation, 10% held-out test |
+| Client split | 80% train, 10% validation, 10% local test |
+| Clean evaluation | Official MNIST test set |
 | Model | MLP: `784 -> 128 -> 10`, ReLU |
 | Optimizer | SGD |
 | Learning rate | 0.01 |
 | Batch size | 64 |
-| Local epochs | 5 |
+| Local epochs | 1 |
 | Communication rounds | 20 |
 | Seeds | 42, 43, 44 |
-| FedProx coefficients | `mu in {0.0, 0.1, 1.0}` |
-| SCAFFOLD variant | Full participation, sample-size-weighted model and control aggregation |
+| FedProx coefficient | `mu = 0.01`, selected before the main benchmark |
+| Aggregation | Sample-size weighted |
 
-Within each seed, all method conditions reuse the same partition, client
-splits, initial model state, and seeded minibatch schedule. The client-local
-test subsets are reserved for final evaluation. The official MNIST test split
-is intentionally not used in the final client-level comparison because it has
-no federated client identity.
+The MNIST training collection is first partitioned into client worlds. Each
+client's assigned indices are then split into training, validation, and local
+test subsets. Rotation transforms, when present, are applied consistently to
+all three local splits. The official MNIST test set stays clean and shared.
 
-### Why sample-size weighting?
+The seed—not an individual client or communication round—is the experimental
+unit. Client-round observations are useful diagnostics, but I do not treat them
+as independent replicates.
 
-I use sample-size weighting so that each training example contributes equally
-to the pooled empirical objective. This is not an assumption that larger
-clients are inherently more important or more representative. Because this
-objective can still prioritize large clients, I report macro client accuracy,
-worst-client accuracy, and cross-client dispersion alongside weighted
-accuracy.
+## What is measured
 
-## What I measure beyond accuracy
+Accuracy alone cannot show whether a method serves every client or how its
+updates interact. The benchmark therefore records several views:
 
-For client update `Delta_i = w_i - w_t`, the main diagnostics are:
-
-| Diagnostic | Question |
+| Output | Question it answers |
 |---|---|
-| Relative update magnitude | How far did the client move relative to the global model scale? |
-| Pairwise cosine similarity | Do two clients move in similar directions? |
-| Leave-one-out alignment | Does one client's update agree with the weighted update of all other clients? |
+| Clean global accuracy | Does the final model generalize to the original MNIST distribution? |
+| Local weighted accuracy | How well does it serve all held-out client examples collectively? |
+| Mean client accuracy | What happens when every client receives equal weight? |
+| Worst-client accuracy | How well is the least-served client doing? |
+| Validation trajectory | How quickly and steadily does training progress? |
+| Runtime | What wall-clock cost is observed under the matched runner? |
 
-These diagnostics help examine mechanism, but they are not independent
-statistical replicates and they do not prove that alignment causes accuracy.
+For each client update `Delta_i = w_i - w_t`, I also record:
 
-## Notebook progression
+- update and relative-update magnitude;
+- pairwise cosine similarity;
+- alignment with the aggregate update;
+- leave-one-out alignment with the weighted update of all other clients.
 
-The repository keeps the early notebooks because they show how the final
-question developed, but the latest conclusions come from Notebooks 06 and 07.
+These diagnostics help describe the optimization mechanism. They do not, by
+themselves, prove that update alignment causes an accuracy change.
 
-| Notebook | Purpose | Role |
-|---|---|---|
-| [`01_fedavg_from_scratch.ipynb`](notebooks/01_fedavg_from_scratch.ipynb) | Implement FedAvg and study local epochs under IID data | Foundation |
-| [`02_fedavg_shard_noniid.ipynb`](notebooks/02_fedavg_shard_noniid.ipynb) | Introduce pathological shard heterogeneity | Exploratory |
-| [`03_fedavg_dirichlet_noniid.ipynb`](notebooks/03_fedavg_dirichlet_noniid.ipynb) | Compare several Dirichlet concentrations | Exploratory |
-| [`04_fedprox_under_heterogeneity.ipynb`](notebooks/04_fedprox_under_heterogeneity.ipynb) | Add FedProx and run an initial coefficient sweep | Exploratory |
-| [`05_client_update_geometry.ipynb`](notebooks/05_client_update_geometry.ipynb) | Measure magnitude and directional agreement in one seeded environment | Mechanism study |
-| [`06_multiseed_fedprox_robustness.ipynb`](notebooks/06_multiseed_fedprox_robustness.ipynb) | Test whether the FedProx finding replicates across matched seeds | Canonical evidence |
-| [`07_scaffold_under_heterogeneity.ipynb`](notebooks/07_scaffold_under_heterogeneity.ipynb) | Compare weighted SCAFFOLD with the matched FedAvg and FedProx baselines | Canonical evidence |
+## How the project developed
 
-For the final evidence, start with Notebooks 06 and 07. Notebook 05 is useful
-for understanding why I moved from final accuracy to client-update geometry.
+The notebooks are intentionally kept in research order. The early notebooks
+show the implementation and the questions that led to the final protocol;
+Notebooks 08–10 contain the coefficient selection, balanced benchmark, and
+final analysis.
+
+| Notebook | Role in the project |
+|---|---|
+| [`01_fedavg_from_scratch.ipynb`](notebooks/01_fedavg_from_scratch.ipynb) | Build FedAvg under IID data |
+| [`02_fedavg_shard_noniid.ipynb`](notebooks/02_fedavg_shard_noniid.ipynb) | Introduce pathological shard heterogeneity |
+| [`03_fedavg_dirichlet_noniid.ipynb`](notebooks/03_fedavg_dirichlet_noniid.ipynb) | Explore Dirichlet label partitions |
+| [`04_fedprox_under_heterogeneity.ipynb`](notebooks/04_fedprox_under_heterogeneity.ipynb) | Implement FedProx and run an initial `mu` sweep |
+| [`05_client_update_geometry.ipynb`](notebooks/05_client_update_geometry.ipynb) | Move from final accuracy to client-update geometry |
+| [`06_multiseed_fedprox_robustness.ipynb`](notebooks/06_multiseed_fedprox_robustness.ipynb) | Test whether the FedProx observations replicate across seeds |
+| [`07_scaffold_under_heterogeneity.ipynb`](notebooks/07_scaffold_under_heterogeneity.ipynb) | Implement SCAFFOLD and compare drift correction under severe label skew |
+| [`08_fedprox_mu_selection.ipynb`](notebooks/08_fedprox_mu_selection.ipynb) | Select one FedProx coefficient using a prespecified pilot rule |
+| [`09_balanced_heterogeneity_benchmark.ipynb`](notebooks/09_balanced_heterogeneity_benchmark.ipynb) | Run the restart-safe 63-run benchmark |
+| [`10_balanced_benchmark_analysis.ipynb`](notebooks/10_balanced_benchmark_analysis.ipynb) | Audit, summarize, visualize, and interpret the final results |
+
+If you want the shortest path through the project, read Notebook 08 for the
+selection protocol, Notebook 09 for the execution contract, and Notebook 10
+for the findings. Notebooks 05–07 explain why I designed the final benchmark
+the way I did.
 
 ## Repository structure
 
 ```text
 .
-├── src/                              # Federated algorithms and utilities
-│   ├── aggregate.py                  # Sample-size-weighted aggregation
-│   ├── data.py                       # IID, shard, and Dirichlet partitioning
-│   ├── diagnostics.py                # Update vectorization and geometry
-│   ├── experiment.py                 # Matched FedAvg/FedProx runner
-│   ├── fedprox.py                    # FedProx local objective
-│   └── scaffold.py                   # Weighted SCAFFOLD and diagnostics
-├── notebooks/                        # Seven experiments in research order
+├── src/
+│   ├── aggregate.py                 # Weighted model aggregation
+│   ├── data.py                      # Client splits and deterministic loaders
+│   ├── diagnostics.py               # Client-update geometry
+│   ├── experiment.py                # FedAvg/FedProx training loop
+│   ├── scaffold.py                  # SCAFFOLD and control variates
+│   ├── heterogeneity.py             # Unified heterogeneity configuration
+│   ├── heterogeneity_metrics.py     # Realized severity measurements
+│   ├── condition_artifacts.py       # Matched partitions, splits, and loaders
+│   ├── benchmark_runner.py          # One algorithm-condition execution
+│   ├── benchmark_suite.py           # Matched multi-condition suite
+│   ├── benchmark_storage.py         # Restart-safe per-run persistence
+│   ├── benchmark_protocol.py        # Frozen pilot and main-study matrix
+│   └── fedprox_selection.py         # Prespecified coefficient selection
+├── notebooks/                       # Ten notebooks in research order
 ├── results/
-│   ├── client_update_geometry/       # Notebook 05 artifacts
-│   ├── multiseed_fedprox/            # Notebook 06 artifacts
-│   └── scaffold_under_heterogeneity/ # Notebook 07 artifacts
-├── docs/methodology.md               # Mathematical and design explanation
-└── tests/test_scaffold_invariants.py # Small deterministic correctness checks
+│   ├── balanced_benchmark_v1/
+│   │   ├── combined/                # Compact canonical CSV files
+│   │   └── analysis/                # Final tables and figures
+│   └── ...                          # Earlier exploratory artifacts
+├── docs/methodology.md
+└── tests/                            # Deterministic unit and integration tests
 ```
 
-See [`results/README.md`](results/README.md) for the artifact map and column
-definitions, and [`notebooks/README.md`](notebooks/README.md) for execution
-guidance.
+See [`notebooks/README.md`](notebooks/README.md) for the notebook execution map
+and [`results/README.md`](results/README.md) for the artifact layout.
 
-## Inspecting or reproducing the study
+## Inspecting the results
+
+The compact final evidence is committed under
+[`results/balanced_benchmark_v1/`](results/balanced_benchmark_v1/). The most
+useful entry points are:
+
+- [`combined/summary.csv`](results/balanced_benchmark_v1/combined/summary.csv):
+  one row per run;
+- [`combined/validation_by_round.csv`](results/balanced_benchmark_v1/combined/validation_by_round.csv):
+  convergence histories;
+- [`combined/local_test_by_client.csv`](results/balanced_benchmark_v1/combined/local_test_by_client.csv):
+  final client-level evaluation;
+- [`analysis/tables/`](results/balanced_benchmark_v1/analysis/tables/): derived
+  comparisons used above;
+- [`analysis/figures/`](results/balanced_benchmark_v1/analysis/figures/): final
+  visualizations.
+
+Notebook 10 performs its analysis from these CSV files and does not require the
+individual model-state files. The complete restartable run directories are kept
+in the release archive `balanced_benchmark_v1_complete.zip`; the FedProx pilot
+is preserved separately as `fedprox_mu_pilot_v1_complete.zip`.
+
+## Installation and checks
 
 ```bash
 git clone https://github.com/khanhhuyenpham/federated-learning-under-heterogeneity.git
@@ -233,63 +346,67 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python -m pip install -r requirements-dev.txt
-python -m pytest -q
+python -m pytest tests -q
 jupyter lab
 ```
 
-The canonical CSV files and figures are committed, so the analysis can be
-inspected without repeating the training runs. Expensive execution flags are
-disabled by default in the published notebooks. Use the restart-safe loaders
-in Notebooks 05–07 to regenerate tables and figures from the saved artifacts.
+The full benchmark was run on Kaggle with one NVIDIA T4. Per-run completion
+markers and condition-specific storage keys allow interrupted suites to resume
+without repeating completed conditions. The saved CSVs are sufficient to inspect
+the conclusions without rerunning the GPU experiments.
 
-The completed multi-seed experiments were run on Kaggle with Python 3.12.13,
-PyTorch 2.10.0+cu128, and one NVIDIA T4. A single seed-condition took roughly
-18 minutes in the baseline experiment, so a complete multi-seed sweep takes
-hours rather than minutes. Exact floating-point reproduction can still vary
-with hardware and backend behavior.
+The test suite checks, among other things:
 
-## Correctness checks
-
-The lightweight test suite checks identities that are central to the
-implementation:
-
-- With zero control variates and matched batches, the first SCAFFOLD local
-  update matches FedAvg.
-- The Option II client-control update matches its closed-form expression on a
-  deterministic toy model.
-- Under full participation, the server control is consistent with the weighted
-  client controls.
-- Vectorized weighted aggregation matches parameter-wise aggregation.
-
-These tests run on synthetic data and do not download MNIST or launch a full
-federated experiment.
+- partition validity, reproducibility, and full coverage;
+- propagation of client-specific transforms to every local split;
+- equality of client IDs across train, validation, and local-test loaders;
+- matched initial weights and condition artifacts across algorithms;
+- FedAvg, FedProx, and SCAFFOLD parameter contracts;
+- SCAFFOLD control-state and aggregation invariants;
+- benchmark key/result consistency and restart-safe storage;
+- coefficient-selection behavior and final-result schemas.
 
 ## Limitations
 
-- The study uses MNIST and a small MLP; it does not establish behavior on
-  harder datasets or architectures.
-- Only three seeded federated environments, five clients, one Dirichlet
-  concentration, and one local-training regime are evaluated.
-- All clients participate in every round. Client dropout and system
-  heterogeneity are not modeled.
-- The client-local held-out sets are derived from the MNIST training
-  collection, so they do not test transfer to a new dataset or deployment.
-- Small client test sets make worst-client accuracy volatile, especially in
-  the most imbalanced partition.
-- This is a sample-size-weighted SCAFFOLD variant; other weighting rules may
-  optimize a different client-level objective.
-- Communication values count full model and control vectors but exclude
-  protocol overhead, compression, and secure aggregation.
-- Update geometry is mechanistically informative but does not independently
-  prove why a method improved accuracy.
+- The study uses MNIST and a small MLP. The rankings may change with harder
+  datasets, convolutional models, or pretrained representations.
+- Three seeds are enough to expose instability, but not enough for strong
+  inferential claims.
+- The benchmark uses five fully participating clients, one local epoch, and a
+  fixed 20-round communication budget. Partial participation and more local
+  work may create different drift behavior.
+- Only one FedProx coefficient is carried into the main benchmark. Its selection
+  is documented, but it is not a claim that `mu = 0.01` transfers to other
+  datasets or protocols.
+- The heterogeneity mechanisms are controlled simulations. They do not capture
+  device availability, network latency, privacy mechanisms, or all forms of
+  real-world distribution shift.
+- Worst-client accuracy is based on five clients and can be sensitive to the
+  realized partition.
+- Runtime is measured consistently within this benchmark environment, but it is
+  not a complete model of production communication or systems cost.
+- Update geometry is descriptive. The experiments support a mechanism-level
+  interpretation, not a causal proof.
+
+The central conclusion is deliberately narrower than “one algorithm wins.” In
+this study, **SCAFFOLD was most useful when heterogeneity created persistent
+label-driven disagreement**. It offered little advantage when clients mainly
+differed in sample count, and feature shift introduced a trade-off between clean
+global and client-local evaluation. FedProx changed update behavior in the
+earlier experiments, but the selected proximal strength did not improve the
+final balanced benchmark.
+
+That is the result I find most useful: the right federated optimizer depends not
+only on how heterogeneous the clients are, but on *how* they are heterogeneous
+and on which population the final model is meant to serve.
 
 ## What I would test next
 
-The next controlled experiment should change one factor at a time. I would
-first replace the MLP with a small CNN while reusing the saved client worlds,
-then expand to more clients, partial participation, and additional forms of
-heterogeneity. I would also compare communication required to reach a target
-accuracy rather than only communication over a fixed 20-round budget.
+The next step would be to keep the same matched benchmark design while changing
+one assumption at a time: replace the MLP with a small CNN, increase the number
+of clients, introduce partial participation, and then move to a more challenging
+dataset. I would also compare communication required to reach a target accuracy,
+rather than only performance after a fixed number of rounds.
 
 ## References
 
@@ -297,11 +414,11 @@ accuracy rather than only communication over a fixed 20-round budget.
   Decentralized Data](https://proceedings.mlr.press/v54/mcmahan17a.html),
   AISTATS 2017.
 - Li et al., [Federated Optimization in Heterogeneous
-  Networks](https://arxiv.org/abs/1812.06127), MLSys 2020.
+  Networks](https://proceedings.mlsys.org/paper_files/paper/2020/hash/1f5fe83998a09396ebe6477d9475ba0c-Abstract.html),
+  MLSys 2020.
 - Karimireddy et al., [SCAFFOLD: Stochastic Controlled Averaging for Federated
   Learning](https://proceedings.mlr.press/v119/karimireddy20a.html), ICML 2020.
 
 ## License
 
 This project is available under the [MIT License](LICENSE).
-

@@ -1,0 +1,4 @@
+mu,mean_validation_accuracy,std_validation_accuracy,num_seeds,within_tolerance,selected
+0.01,0.8450222222222221,0.02066866477796044,3,True,True
+0.1,0.8429666666666668,0.021096919206367575,3,True,False
+1.0,0.8224888888888889,0.023298696514167043,3,False,False

@@ -3,6 +3,7 @@ sample_data/
 .ipynb_checkpoints/
 
 # Downloaded datasets
+data/
 datasets/
 
 # Python
@@ -24,6 +25,13 @@ env/
 # Temporary checkpoints generated during scratch runs
 checkpoints/
 
+artifacts/*.zip
 results/**/final_model_mu_*.pt
 results/**/*.zip
+results/**/runs/
+results/**/*_checkpoint.zip
+results/**/model_state.pt
+results/**/extra_artifacts.pt
+notebooks/**/archive/
+notebooks/testing.ipynb
 results/**/_invalid_client_history/
